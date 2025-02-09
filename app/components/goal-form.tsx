@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Loader2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 
+const BACKEND_URL = "https://backend-65271787895.europe-west1.run.app"
+
 export function GoalForm() {
   const [formData, setFormData] = useState({
     goal: "",
@@ -20,38 +22,82 @@ export function GoalForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [showDialog, setShowDialog] = useState(false)
   const [markdown, setMarkdown] = useState("")
+  const [smartGoal, setSmartGoal] = useState("")
+  const [editableSmartGoal, setEditableSmartGoal] = useState("")
+  const [showSmartGoalValidation, setShowSmartGoalValidation] = useState(false)
+  const [isEditingSmartGoal, setIsEditingSmartGoal] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
-    // Simulate processing time
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    try {
+      // First API call to get SMART goal
+      const smartGoalResponse = await fetch(`${BACKEND_URL}/smart_goal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: "temp_user_id", // You might want to implement proper user management
+          pre_goal_data: {
+            goal: formData.goal,
+            what: formData.what,
+            why: formData.why,
+            when: formData.when,
+          }
+        }),
+      })
 
-    const generatedMarkdown = generateMarkdown(formData)
-    setMarkdown(generatedMarkdown)
-    setIsLoading(false)
-    setShowDialog(true)
+      if (!smartGoalResponse.ok) {
+        throw new Error('Failed to generate SMART goal')
+      }
+
+      const smartGoalData = await smartGoalResponse.json()
+      setSmartGoal(smartGoalData)
+      setEditableSmartGoal(smartGoalData)
+      setShowSmartGoalValidation(true)
+      setIsLoading(false)
+    } catch (error) {
+      console.error('Error generating SMART goal:', error)
+      setIsLoading(false)
+    }
   }
 
-  const generateMarkdown = (data: typeof formData) => {
-    return `# Goal Planning Document
+  const handleSmartGoalValidation = async (isValid: boolean) => {
+    if (!isValid) {
+      setIsEditingSmartGoal(true)
+      return
+    }
 
-## 🎯 Main Goal
-${data.goal}
+    setIsLoading(true)
+    try {
+      // Second API call to generate milestones and tasks
+      const milestonesResponse = await fetch(`${BACKEND_URL}/generate_milestones_and_tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          validated_goal: isEditingSmartGoal ? editableSmartGoal : smartGoal,
+          user_id: "temp_user_id", // You might want to implement proper user management
+        }),
+      })
 
-## 📝 Action Plan
-${data.what}
+      if (!milestonesResponse.ok) {
+        throw new Error('Failed to generate milestones and tasks')
+      }
 
-## 💡 Motivation
-${data.why}
-
-## ⏱️ Timeline
-Target completion: ${data.when}
-
----
-Generated with Goal Planner ✨
-`
+      const goalPlanData = await milestonesResponse.json()
+      setMarkdown(goalPlanData)
+      setShowSmartGoalValidation(false)
+      setShowDialog(true)
+      setIsEditingSmartGoal(false)
+    } catch (error) {
+      console.error('Error generating milestones and tasks:', error)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const downloadMarkdown = (format: "md" | "txt") => {
@@ -144,13 +190,82 @@ Generated with Goal Planner ✨
         </form>
       </Card>
 
+      {/* SMART Goal Validation Dialog */}
+      <Dialog open={showSmartGoalValidation} onOpenChange={setShowSmartGoalValidation}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Validate Your SMART Goal</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-500 mb-4">
+              We've transformed your goal into a SMART goal. Please review and validate it:
+            </p>
+            {isEditingSmartGoal ? (
+              <Textarea
+                value={editableSmartGoal}
+                onChange={(e) => setEditableSmartGoal(e.target.value)}
+                className="w-full min-h-[150px] p-4 bg-gray-100 rounded-lg text-gray-900"
+                placeholder="Edit your SMART goal here..."
+              />
+            ) : (
+              <div className="p-4 bg-gray-100 rounded-lg">
+                <p className="text-gray-900">{smartGoal}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            {isEditingSmartGoal ? (
+              <>
+                <Button variant="outline" onClick={() => {
+                  setEditableSmartGoal(smartGoal)
+                  setIsEditingSmartGoal(false)
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={() => {
+                  setSmartGoal(editableSmartGoal)
+                  setIsEditingSmartGoal(false)
+                  handleSmartGoalValidation(true)
+                }}>
+                  Save and Generate Plan
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => handleSmartGoalValidation(false)}>
+                  Revise Goal
+                </Button>
+                <Button onClick={() => handleSmartGoalValidation(true)}>
+                  Accept and Generate Plan
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Final Plan Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Your Goal Plan</DialogTitle>
           </DialogHeader>
-          <div className="prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown>{markdown}</ReactMarkdown>
+          <div className="prose prose-sm dark:prose-invert max-w-none py-6">
+            <div className="bg-white/10 rounded-lg p-6 backdrop-blur-sm">
+              <ReactMarkdown 
+                components={{
+                  h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-4 text-blue-100" {...props} />,
+                  h2: ({node, ...props}) => <h2 className="text-xl font-semibold mb-3 text-blue-200" {...props} />,
+                  h3: ({node, ...props}) => <h3 className="text-lg font-medium mb-2 text-blue-300" {...props} />,
+                  p: ({node, ...props}) => <p className="mb-4 text-white/90" {...props} />,
+                  ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 text-white/90" {...props} />,
+                  ol: ({node, ...props}) => <ol className="list-decimal pl-6 mb-4 text-white/90" {...props} />,
+                  li: ({node, ...props}) => <li className="mb-1" {...props} />,
+                }}
+              >
+                {markdown}
+              </ReactMarkdown>
+            </div>
           </div>
           <DialogFooter className="flex gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => downloadMarkdown("txt")}>
