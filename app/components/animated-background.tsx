@@ -1,10 +1,17 @@
 export function AnimatedBackground() {
   return (
-    <div className="fixed inset-0 -z-10">
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-900 animate-gradient-x"></div>
-      <div className="absolute inset-0 opacity-30">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;charset=utf-8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1000 1000%22><path d=%22M0 0h1000v1000H0z%22 fill=%22none%22 stroke=%22%23fff%22 stroke-opacity=%22.05%22 stroke-width=%222%22/></svg>')] bg-[length:20px_20px]"></div>
-      </div>
+    <div className="fixed inset-0 -z-10 h-full w-full bg-gradient-to-b from-blue-950 to-blue-900">
+      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+      <div
+        className="absolute inset-0 bg-gradient-to-br from-blue-700/20 via-blue-900/30 to-blue-950/50 backdrop-blur-[1px]"
+        style={{
+          backgroundImage: `
+            radial-gradient(circle at 15% 50%, var(--tw-gradient-stops)),
+            radial-gradient(circle at 85% 30%, var(--tw-gradient-stops))
+          `,
+        }}
+      />
+      <div className="absolute inset-0 bg-blue-950/20" />
     </div>
   )
 }
