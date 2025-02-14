@@ -10,11 +10,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Loader2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { GoalPlan } from "@/app/types/goal"
-import { doc, getDoc } from "firebase/firestore"
+import { doc, getDoc, collection, addDoc } from "firebase/firestore"
 import { db } from "@/db/configFirebase"
 import { cn } from "@/lib/utils"
 import axios from "axios"
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL
+import OpenAI from "openai"
+import { smartGoal as generateSmartGoal, generateMilestonesAndTasks } from "./goal-to-tasks"
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true // Note: In production, you should use a backend
+})
 
 export function GoalForm() {
   const [formData, setFormData] = useState({
@@ -39,28 +46,20 @@ export function GoalForm() {
 
   const generateMarkdown = (goalPlan: GoalPlan) => {
     const { goal } = goalPlan;
-    let markdown = `# ${goal.title}\n\n`;
-    markdown += `## Description\n${goal.description}\n\n`;
-    markdown += `**Target Date:** ${new Date(goal.targetDate).toLocaleDateString()}\n`;
-    markdown += `**Status:** ${goal.status}\n\n`;
+    let markdown = `# ${goal.name}\n\n`;
+    markdown += `## Description\n${goal.description || 'No description provided'}\n\n`;
+    markdown += `**Target Date:** ${new Date(goal.deadline).toLocaleDateString()}\n`;
 
     markdown += `## Milestones\n\n`;
     goal.milestones.forEach((milestone, index) => {
-      markdown += `### ${index + 1}. ${milestone.title}\n\n`;
-      markdown += `${milestone.description}\n\n`;
-      if (milestone.targetDate) {
-        markdown += `**Target Date:** ${new Date(milestone.targetDate).toLocaleDateString()}\n`;
-      }
-      markdown += `**Status:** ${milestone.status}\n\n`;
-
+      markdown += `### ${index + 1}. ${milestone.name}\n\n`;
+      markdown += `${milestone.description || 'No description provided'}\n\n`;
       markdown += `#### Tasks\n\n`;
       milestone.tasks.forEach((task, taskIndex) => {
-        markdown += `${taskIndex + 1}. **${task.title}**\n`;
-        markdown += `   - ${task.description}\n`;
-        if (task.dueDate) {
-          markdown += `   - Due: ${new Date(task.dueDate).toLocaleDateString()}\n`;
+        markdown += `${taskIndex + 1}. **${task.name}**\n`;
+        if (task.description) {
+          markdown += `   - ${task.description}\n`;
         }
-        markdown += `   - Status: ${task.status}\n\n`;
       });
     });
 
@@ -98,28 +97,15 @@ export function GoalForm() {
     setGenerationStep('smart')
 
     try {
-      const smartGoalResponse = await fetch(`${BACKEND_URL}/smart_goal`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: "temp_user_id",
-          pre_goal_data: {
-            what: formData.what,
-            why: formData.why,
-            when: formData.when,
-          }
-        }),
-      })
+      const smartGoalResult = await generateSmartGoal({
+        what: formData.what,
+        why: formData.why,
+        when: formData.when,
+        profile: {} // Add profile data if needed
+      });
 
-      if (!smartGoalResponse.ok) {
-        throw new Error('Failed to generate SMART goal. Please try again.')
-      }
-
-      const smartGoalData = await smartGoalResponse.json()
-      setSmartGoal(smartGoalData)
-      setEditableSmartGoal(smartGoalData)
+      setSmartGoal(smartGoalResult)
+      setEditableSmartGoal(smartGoalResult)
       setShowSmartGoalValidation(true)
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An unexpected error occurred')
@@ -140,30 +126,13 @@ export function GoalForm() {
     setError(null)
 
     try {
-      const milestonesResponse = await axios.post(
-        `${process.env.NEXT_PUBLIC_BACKEND_API_URL}/generate_milestones_and_tasks`,
-        {
-          validated_goal: isEditingSmartGoal ? editableSmartGoal : smartGoal,
-          user_id: "temp_user_id"
-        }
+      const goalPlanData = await generateMilestonesAndTasks(
+        isEditingSmartGoal ? editableSmartGoal : smartGoal
       );
-
-      if (milestonesResponse.status !== 200) {
-        throw new Error('Failed to generate milestones and tasks. Please try again.')
-      }
-
-      const goalPlanPath = milestonesResponse.data 
       
-      const docRef = doc(db, goalPlanPath)
-      const docSnap = await getDoc(docRef)
-      
-      if (!docSnap.exists()) {
-        throw new Error('Goal plan not found. Please try again.')
-      }
-
-      const goalPlanData = docSnap.data() as GoalPlan
-      const markdown = generateMarkdown(goalPlanData)
-      setGoalPlan({ ...goalPlanData, markdown })
+      const goalPlan = { goal: goalPlanData, markdown: "" }
+      const markdown = generateMarkdown(goalPlan)
+      setGoalPlan({ goal: goalPlanData, markdown })
       setShowSmartGoalValidation(false)
       setShowDialog(true)
       setIsEditingSmartGoal(false)
@@ -388,7 +357,7 @@ export function GoalForm() {
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto bg-gradient-to-b from-blue-950 to-blue-900 border border-blue-400/30 shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-blue-100 border-b border-blue-400/30 pb-4">Your Goal Plan</DialogTitle>
+            <DialogTitle className="text-lg font-bold text-blue-100 border-b border-blue-400/30 pb-4">Your Goal Plan</DialogTitle>
           </DialogHeader>
           <div className="prose prose-lg dark:prose-invert max-w-none py-6">
             {isLoading ? (
@@ -398,18 +367,18 @@ export function GoalForm() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="bg-blue-900/50 rounded-xl p-8 backdrop-blur-sm shadow-2xl border border-blue-400/20">
+                <div className="bg-blue-900/50 rounded-xl w-[80%] p-8 backdrop-blur-sm shadow-2xl border border-blue-400/20">
                   {goalPlan && (
                     <ReactMarkdown 
                       components={{
-                        h1: ({node, ...props}) => <h1 className="text-3xl font-bold mb-6 text-blue-50 border-b border-blue-400/30 pb-3 tracking-wide" {...props} />,
-                        h2: ({node, ...props}) => <h2 className="text-2xl font-semibold mb-4 text-blue-100 tracking-wide" {...props} />,
-                        h3: ({node, ...props}) => <h3 className="text-xl font-medium mb-3 text-blue-200 tracking-wide" {...props} />,
-                        h4: ({node, ...props}) => <h4 className="text-lg font-medium mb-2 text-blue-300 tracking-wide" {...props} />,
-                        p: ({node, ...props}) => <p className="mb-4 text-blue-50/90 leading-relaxed text-lg" {...props} />,
-                        ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 text-blue-50/90 space-y-2 text-lg" {...props} />,
-                        ol: ({node, ...props}) => <ol className="list-decimal pl-6 mb-4 text-blue-50/90 space-y-2 text-lg" {...props} />,
-                        li: ({node, ...props}) => <li className="mb-2 text-lg" {...props} />,
+                        h1: ({node, ...props}) => <h1 className="text-base sm:text-lg md:text-xl text-center font-bold mb-4 sm:mb-6 text-blue-50 border-b border-blue-400/30 pb-2 sm:pb-3 tracking-wide" {...props} />,
+                        h2: ({node, ...props}) => <h2 className="text-sm sm:text-lg font-semibold mb-3 sm:mb-4 text-blue-100 tracking-wide" {...props} />,
+                        h3: ({node, ...props}) => <h3 className="text-xs sm:text-md font-medium mb-2 sm:mb-3 text-blue-200 tracking-wide" {...props} />,
+                        h4: ({node, ...props}) => <h4 className="text-xs sm:text-sm font-medium mb-2 text-blue-300 tracking-wide" {...props} />,
+                        p: ({node, ...props}) => <p className="text-xs sm:text-sm mb-3 sm:mb-4 text-blue-50/90 leading-relaxed" {...props} />,
+                        ul: ({node, ...props}) => <ul className="list-disc pl-4 sm:pl-6 mb-3 sm:mb-4 text-blue-50/90 space-y-1 sm:space-y-2 text-xs sm:text-sm" {...props} />,
+                        ol: ({node, ...props}) => <ol className="list-decimal pl-4 sm:pl-6 mb-3 sm:mb-4 text-blue-50/90 space-y-1 sm:space-y-2 text-xs sm:text-sm" {...props} />,
+                        li: ({node, ...props}) => <li className="mb-1 sm:mb-2 text-xs sm:text-sm" {...props} />,
                         strong: ({node, ...props}) => <strong className="text-blue-100 font-semibold" {...props} />,
                       }}
                     >
@@ -480,9 +449,19 @@ export function GoalForm() {
               Cancel
             </Button>
             <Button 
-              onClick={() => {
-                // Submit the feedback to your backend or handle it as needed.
-                console.log("User Feedback:", feedbackText)
+              onClick={async () => {
+                try {
+                  // Save the feedback to Firebase Firestore under the "feedback" collection
+                  console.log("Saving feedback to", collection(db, "feedback"))
+                  await addDoc(collection(db, "feedbacks"), {
+                    text: feedbackText,
+                    createdAt: new Date(), // Record the current timestamp
+                  })
+                  console.log("Feedback saved to Firebase successfully:", feedbackText)
+                } catch (error) {
+                  console.error("Error saving feedback to Firebase:", error)
+                }
+                // Clear the feedback input and close the dialog
                 setFeedbackText("")
                 setShowFeedback(false)
               }}

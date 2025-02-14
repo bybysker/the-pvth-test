@@ -1,27 +1,41 @@
+export interface PreGoal {
+  what: string;
+  why: string;
+  when: string;
+  profile: Record<string, any>;
+}
+
 export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: 'pending' | 'in-progress' | 'completed';
-  dueDate?: string;
+  name: string;
+  order: number;
+  description?: string;
+  duration_hours: number;
+  deadline: string;
+  simplicity: number;
+  importance: number;
+  urgency: number;
+  completed: boolean;
+  guid: string;
+  muid: string;
 }
 
 export interface Milestone {
-  id: string;
-  title: string;
-  description: string;
+  muid: string;
+  name: string;
+  order: number;
+  description?: string;
   tasks: Task[];
-  targetDate?: string;
-  status: 'pending' | 'in-progress' | 'completed';
+  deadline?: string;
+  guid: string;
 }
 
 export interface Goal {
-  id: string;
-  title: string;
-  description: string;
+  guid: string;
+  name: string;
+  description?: string;
+  deadline: string;
+  progress: number;
   milestones: Milestone[];
-  targetDate: string;
-  status: 'pending' | 'in-progress' | 'completed';
 }
 
 export interface GoalPlan {
