@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "@/components/ui/drawer"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Loader2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { GoalPlan } from "@/app/types/goal"
@@ -16,6 +18,8 @@ import { cn } from "@/lib/utils"
 import axios from "axios"
 import OpenAI from "openai"
 import { smartGoal as generateSmartGoal, generateMilestonesAndTasks } from "./goal-to-tasks"
+import { useToast } from "@/hooks/use-toast"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -24,13 +28,14 @@ const openai = new OpenAI({
 })
 
 export function GoalForm() {
+  const { toast } = useToast()
   const [formData, setFormData] = useState({
     what: "",
     why: "",
     when: "",
   })
   const [isLoading, setIsLoading] = useState(false)
-  const [showDialog, setShowDialog] = useState(false)
+  const [showDrawer, setShowDrawer] = useState(false)
   const [goalPlan, setGoalPlan] = useState<GoalPlan | null>(null)
   const [smartGoal, setSmartGoal] = useState("")
   const [editableSmartGoal, setEditableSmartGoal] = useState("")
@@ -44,13 +49,17 @@ export function GoalForm() {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedbackText, setFeedbackText] = useState("")
 
+  // Add new state for onboarding
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [onboardingStep, setOnboardingStep] = useState(0)
+
   const generateMarkdown = (goalPlan: GoalPlan) => {
     const { goal } = goalPlan;
     let markdown = `# ${goal.name}\n\n`;
     markdown += `## Description\n${goal.description || 'No description provided'}\n\n`;
     markdown += `**Target Date:** ${new Date(goal.deadline).toLocaleDateString()}\n`;
 
-    markdown += `## Milestones\n\n`;
+    markdown += `## Goal Plan \n\n`;
     goal.milestones.forEach((milestone, index) => {
       markdown += `### ${index + 1}. ${milestone.name}\n\n`;
       markdown += `${milestone.description || 'No description provided'}\n\n`;
@@ -95,6 +104,7 @@ export function GoalForm() {
 
     setIsLoading(true)
     setGenerationStep('smart')
+    setShowDrawer(true)
 
     try {
       const smartGoalResult = await generateSmartGoal({
@@ -123,6 +133,9 @@ export function GoalForm() {
 
     setIsLoading(true)
     setGenerationStep('milestones')
+    setIsEditingSmartGoal(false)
+    setShowSmartGoalValidation(false)
+    setShowOnboarding(true)
     setError(null)
 
     try {
@@ -133,13 +146,18 @@ export function GoalForm() {
       const goalPlan = { goal: goalPlanData, markdown: "" }
       const markdown = generateMarkdown(goalPlan)
       setGoalPlan({ goal: goalPlanData, markdown })
-      setShowSmartGoalValidation(false)
-      setShowDialog(true)
-      setIsEditingSmartGoal(false)
       setGenerationStep('complete')
+      setShowOnboarding(false)
+      
+      toast({
+        title: "Goal Plan Generated!",
+        description: "Your personalized goal plan is ready. Let's walk through how to make the most of it.",
+        duration: 5000,
+      })
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An unexpected error occurred')
       setGenerationStep('smart')
+      setShowOnboarding(false)
     } finally {
       setIsLoading(false)
     }
@@ -159,6 +177,115 @@ export function GoalForm() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
+
+  // Add the feedback submission handler
+  const handleFeedbackSubmit = async () => {
+    try {
+      await addDoc(collection(db, "feedbacks"), {
+        text: feedbackText,
+        createdAt: new Date(),
+      })
+      setFeedbackText("")
+      setShowFeedback(false)
+      toast({
+        title: "Thank you for your feedback!",
+        description: "We appreciate your input and will use it to improve our service.",
+        duration: 3000,
+      })
+    } catch (error) {
+      console.error("Error saving feedback:", error)
+      toast({
+        title: "Error submitting feedback",
+        description: "Please try again later.",
+        variant: "destructive",
+        duration: 3000,
+      })
+    }
+  }
+
+  // Add onboarding steps content
+  const onboardingSteps = [
+    {
+      title: "Welcome to Your Goal Plan!",
+      description: "We've created a detailed roadmap to help you achieve your goal. Let's walk through how to use it effectively.",
+    },
+    {
+      title: "Understanding Your Plan",
+      description: "Your plan is broken down into milestones and specific tasks. Each milestone represents a key achievement on your journey.",
+    },
+    {
+      title: "Track Your Progress",
+      description: "Download your plan in either Markdown or TXT format to track your progress and keep it handy.",
+    },
+    {
+      title: "Share Your Experience",
+      description: "Your feedback helps us improve! Consider sharing your experience with our goal planning tool.",
+    }
+  ]
+
+  // Add useEffect for auto-sliding onboarding
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    
+    if (showOnboarding && isLoading) {
+      timer = setTimeout(() => {
+        if (onboardingStep === onboardingSteps.length - 1) {
+          setOnboardingStep(0);
+        } else {
+          setOnboardingStep(step => step + 1);
+        }
+      }, 5000);
+    }
+
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [showOnboarding, onboardingStep, onboardingSteps.length, isLoading]);
+
+  // Add circular progress animation component
+  const CircularProgress = () => {
+    return (
+      <div className="absolute top-6 right-6">
+        <svg className="w-6 h-6 -rotate-90">
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="2"
+            fill="none"
+            className="text-blue-400/30"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="2"
+            fill="none"
+            className="text-blue-100"
+            strokeDasharray="62.83"
+            strokeDashoffset="0"
+            style={{
+              animation: "circle-progress 5s linear infinite",
+            }}
+          />
+        </svg>
+        <style jsx global>{`
+          @keyframes circle-progress {
+            from {
+              stroke-dashoffset: 62.83;
+            }
+            to {
+              stroke-dashoffset: 0;
+            }
+          }
+        `}</style>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -353,119 +480,164 @@ export function GoalForm() {
         </DialogContent>
       </Dialog>
 
-      {/* Final Plan Dialog */}
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto bg-gradient-to-b from-blue-950 to-blue-900 border border-blue-400/30 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-blue-100 border-b border-blue-400/30 pb-4">Your Goal Plan</DialogTitle>
-          </DialogHeader>
-          <div className="prose prose-lg dark:prose-invert max-w-none py-6">
-            {isLoading ? (
-              <div className="flex flex-col items-center justify-center space-y-4 py-12">
-                <Loader2 className="h-12 w-12 animate-spin text-blue-100" />
-                <p className="text-blue-100 text-lg animate-pulse">Generating your personalized goal plan...</p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="bg-blue-900/50 rounded-xl w-[80%] p-8 backdrop-blur-sm shadow-2xl border border-blue-400/20">
-                  {goalPlan && (
-                    <ReactMarkdown 
-                      components={{
-                        h1: ({node, ...props}) => <h1 className="text-base sm:text-lg md:text-xl text-center font-bold mb-4 sm:mb-6 text-blue-50 border-b border-blue-400/30 pb-2 sm:pb-3 tracking-wide" {...props} />,
-                        h2: ({node, ...props}) => <h2 className="text-sm sm:text-lg font-semibold mb-3 sm:mb-4 text-blue-100 tracking-wide" {...props} />,
-                        h3: ({node, ...props}) => <h3 className="text-xs sm:text-md font-medium mb-2 sm:mb-3 text-blue-200 tracking-wide" {...props} />,
-                        h4: ({node, ...props}) => <h4 className="text-xs sm:text-sm font-medium mb-2 text-blue-300 tracking-wide" {...props} />,
-                        p: ({node, ...props}) => <p className="text-xs sm:text-sm mb-3 sm:mb-4 text-blue-50/90 leading-relaxed" {...props} />,
-                        ul: ({node, ...props}) => <ul className="list-disc pl-4 sm:pl-6 mb-3 sm:mb-4 text-blue-50/90 space-y-1 sm:space-y-2 text-xs sm:text-sm" {...props} />,
-                        ol: ({node, ...props}) => <ol className="list-decimal pl-4 sm:pl-6 mb-3 sm:mb-4 text-blue-50/90 space-y-1 sm:space-y-2 text-xs sm:text-sm" {...props} />,
-                        li: ({node, ...props}) => <li className="mb-1 sm:mb-2 text-xs sm:text-sm" {...props} />,
-                        strong: ({node, ...props}) => <strong className="text-blue-100 font-semibold" {...props} />,
-                      }}
-                    >
-                      {goalPlan.markdown}
-                    </ReactMarkdown>
-                  )}
-                </div>
-                {goalPlan && (
-                  <div className="bg-blue-900/30 rounded-lg p-4 border border-blue-400/20">
-                    <p className="text-blue-100 mb-3">Download your goal plan:</p>
-                    <div className="flex gap-3">
-                      <Button 
-                        variant="outline" 
-                        onClick={() => downloadMarkdown("txt")}
-                        className="flex-1 border-blue-400/30 text-blue-100 hover:bg-blue-800/50 transition-colors duration-200"
-                      >
-                        <span className="mr-2">📄</span>
-                        Download as TXT
-                      </Button>
-                      <Button 
-                        onClick={() => downloadMarkdown("md")}
-                        className="flex-1 bg-gradient-to-r from-blue-100 to-white text-blue-900 hover:from-white hover:to-blue-50 transition-all duration-200"
-                      >
-                        <span className="mr-2">📝</span>
-                        Download as Markdown
-                      </Button>
+      {/* Goal Plan Drawer */}
+      <Drawer open={showDrawer} onOpenChange={setShowDrawer}>
+        <DrawerContent className="h-[95dvh] bg-gradient-to-b from-blue-950 to-blue-900 border-t border-blue-400/30">
+          <div className="mx-auto w-full max-w-2xl">
+            <DrawerHeader className="relative">
+              <DrawerTitle className="text-lg text-center font-bold text-blue-100 border-b border-blue-400/30 pb-4">
+                {isLoading ? "Generating Your Goal Plan..." : "Your Goal Plan"}
+              </DrawerTitle>
+            </DrawerHeader>
+            <div className="px-4">
+              <div className="mt-6">
+                {isLoading ? (
+                  <div className="space-y-6">
+                    <div className="flex flex-col items-center justify-center space-y-4 py-6">
+                      <Loader2 className="h-12 w-12 animate-spin text-blue-100" />
+                      <p className="text-blue-100 text-lg animate-pulse">
+                        {generationStep === 'smart' ? 'Creating your SMART goal...' :
+                         generationStep === 'milestones' ? 'Generating milestones and tasks...' :
+                         'Processing your goal...'}
+                      </p>
                     </div>
+                    
+                    {/* Onboarding during generation */}
+                    {showOnboarding && (
+                      <div className="bg-blue-900/50 rounded-xl p-6 backdrop-blur-sm shadow-xl border border-blue-400/20 relative">
+                        <CircularProgress />
+                        <h3 className="text-xl font-bold text-blue-100 mb-4">
+                          {onboardingSteps[onboardingStep].title}
+                        </h3>
+                        <p className="text-blue-100 text-base leading-relaxed">
+                          {onboardingSteps[onboardingStep].description}
+                        </p>
+                        <div className="flex justify-center mt-6">
+                          <div className="flex gap-2">
+                            {Array.from({ length: onboardingSteps.length }).map((_, index) => (
+                              <div
+                                key={index}
+                                className={cn(
+                                  "w-2 h-2 rounded-full transition-all duration-500",
+                                  index === onboardingStep ? "bg-blue-100" : "bg-blue-400/30"
+                                )}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  goalPlan && (
+                    <div className="flex flex-col space-y-6 pb-20">
+                      <div className="space-y-2 p-4 text-center">
+                        <h2 className="text-lg text-blue-100 font-bold">{goalPlan.goal.name}</h2>
+                        <p className="text-sm text-blue-200">{goalPlan.goal.description}</p>
+                        <p className="text-sm text-blue-300">Target Date: {new Date(goalPlan.goal.deadline).toLocaleDateString()}</p>
+                      </div>
+                      <ScrollArea className="max-h-[50vh]">
+                        <Accordion type="single" collapsible className="w-full">
+                          {goalPlan.goal.milestones.map((milestone, index) => (
+                            <AccordionItem key={index} value={`milestone-${index}`} className="border-blue-400/30">
+                              <AccordionTrigger className="text-blue-100 hover:text-blue-200">
+                                {milestone.name}
+                              </AccordionTrigger>
+                              <AccordionContent className="text-blue-100">
+                                <div className="space-y-4 p-4">
+                                  <p className="text-sm text-blue-200">{milestone.description}</p>
+                                  <div className="space-y-2">
+                                    <h4 className="text-sm font-medium text-blue-300">Tasks:</h4>
+                                    <ul className="list-disc pl-4 space-y-2">
+                                      {milestone.tasks.map((task, taskIndex) => (
+                                        <li key={taskIndex} className="text-sm">
+                                          <span className="font-medium">{task.name}</span>
+                                          {task.description && (
+                                            <p className="text-blue-300 text-xs mt-1">{task.description}</p>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          ))}
+                        </Accordion>
+                      </ScrollArea>
+
+                      <div className="fixed bottom-0 left-0 right-0 bg-blue-900/95 backdrop-blur-sm border-t border-blue-400/20 p-4">
+                        <div className="max-w-2xl mx-auto">
+                          <p className="text-blue-100 mb-2 text-sm sm:text-base text-center">
+                            Download your goal plan:
+                          </p>
+                          <div className="flex gap-2 sm:gap-3">
+                            <Button 
+                              variant="outline" 
+                              onClick={() => downloadMarkdown("txt")}
+                              className="flex-1 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-indigo-500 to-blue-500 text-white border-transparent hover:from-indigo-600 hover:to-blue-600 transition-all duration-200"
+                            >
+                              <span className="mr-1 sm:mr-1.5">📄</span>
+                              TXT
+                            </Button>
+                            <Button 
+                              onClick={() => downloadMarkdown("md")}
+                              className="flex-1 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-200"
+                            >
+                              <span className="mr-1 sm:mr-1.5">📝</span>
+                              Markdown
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
                 )}
               </div>
-            )}
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
 
-      {/* Floating Feedback Button */}
+      {/* Floating Feedback Button - Made more mobile friendly */}
       <Button 
         variant="outline"
-        className="fixed bottom-4 right-4 z-50 bg-blue-100 text-blue-900 hover:bg-blue-200 transition-colors duration-200 px-4 py-2 rounded-full shadow-lg"
+        className="fixed bottom-4 right-4 z-50 bg-blue-100 text-blue-900 hover:bg-blue-200 transition-colors duration-200 px-3 py-1.5 text-sm sm:px-4 sm:py-2 sm:text-base rounded-full shadow-lg"
         onClick={() => setShowFeedback(true)}
       >
         Feedback
       </Button>
 
-      {/* Feedback Dialog */}
+      {/* Feedback Dialog - Enhanced for mobile */}
       <Dialog open={showFeedback} onOpenChange={setShowFeedback}>
-        <DialogContent className="max-w-sm rounded-lg bg-gradient-to-b from-blue-950 to-blue-900 border border-blue-400/30 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-blue-100">We value your feedback</DialogTitle>
+        <DialogContent className="w-[95vw] max-w-[400px] p-4 sm:p-6 rounded-lg bg-gradient-to-b from-blue-950 to-blue-900 border border-blue-400/30 shadow-2xl">
+          <DialogHeader className="space-y-2 sm:space-y-3">
+            <DialogTitle className="text-xl sm:text-2xl font-bold text-blue-100 text-center sm:text-left">
+              We value your feedback
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-3 sm:py-4">
             <Textarea 
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
               placeholder="Tell us what you think about our site..."
-              className="w-full min-h-[100px] p-4 bg-blue-900/50 rounded-lg text-blue-100 border border-blue-400/30 shadow-inner transition-all duration-200 focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50"
+              className="w-full min-h-[120px] sm:min-h-[150px] text-sm sm:text-base p-3 sm:p-4 bg-blue-900/50 rounded-lg text-blue-100 border border-blue-400/30 shadow-inner transition-all duration-200 focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50"
             />
           </div>
-          <DialogFooter className="space-x-3">
+          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 mt-2">
             <Button 
               variant="outline" 
               onClick={() => {
                 setFeedbackText("")
                 setShowFeedback(false)
               }}
-              className="py-3 border-blue-400/50 text-blue-900 hover:bg-blue-200 transition-colors duration-200"
+              className="w-full sm:w-auto p-2 sm:p-3 text-sm sm:text-base border-blue-400/50 text-blue-900 hover:bg-blue-200 transition-colors duration-200"
             >
               Cancel
             </Button>
             <Button 
-              onClick={async () => {
-                try {
-                  // Save the feedback to Firebase Firestore under the "feedback" collection
-                  console.log("Saving feedback to", collection(db, "feedback"))
-                  await addDoc(collection(db, "feedbacks"), {
-                    text: feedbackText,
-                    createdAt: new Date(), // Record the current timestamp
-                  })
-                  console.log("Feedback saved to Firebase successfully:", feedbackText)
-                } catch (error) {
-                  console.error("Error saving feedback to Firebase:", error)
-                }
-                // Clear the feedback input and close the dialog
-                setFeedbackText("")
-                setShowFeedback(false)
-              }}
-              className="py-3 bg-blue-100 text-blue-900 hover:bg-blue-200 transition-all duration-200"
+              onClick={handleFeedbackSubmit}
+              className="w-full sm:w-auto p-2 sm:p-3 text-sm sm:text-base bg-blue-100 text-blue-900 hover:bg-blue-200 transition-all duration-200"
             >
               Submit Feedback
             </Button>
