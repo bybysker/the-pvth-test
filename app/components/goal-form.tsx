@@ -53,6 +53,8 @@ export function GoalForm() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingStep, setOnboardingStep] = useState(0)
 
+  const [hasLastGoal, setHasLastGoal] = useState(false)
+
   const generateMarkdown = (goalPlan: GoalPlan) => {
     const { goal } = goalPlan;
     let markdown = `# ${goal.name}\n\n`;
@@ -125,6 +127,57 @@ export function GoalForm() {
     }
   }
 
+  // Add local storage functions
+  const saveGoalToLocalStorage = (goalData: GoalPlan) => {
+    try {
+      localStorage.setItem('lastGoal', JSON.stringify({
+        goalPlan: goalData,
+        timestamp: new Date().toISOString()
+      }));
+    } catch (error) {
+      console.error('Error saving to local storage:', error);
+    }
+  };
+
+  const loadLastGoal = () => {
+    try {
+      const savedGoal = localStorage.getItem('lastGoal');
+      if (savedGoal) {
+        const { goalPlan: lastGoal, timestamp } = JSON.parse(savedGoal);
+        return { lastGoal, timestamp };
+      }
+    } catch (error) {
+      console.error('Error loading from local storage:', error);
+    }
+    return null;
+  };
+
+  // Add function to check and load last goal
+  const checkLastGoal = () => {
+    const savedGoal = localStorage.getItem('lastGoal');
+    if (savedGoal) {
+      setHasLastGoal(true);
+      return true;
+    }
+    return false;
+  };
+
+  // Add function to view last goal
+  const viewLastGoal = () => {
+    const savedGoalData = loadLastGoal();
+    if (savedGoalData) {
+      const { lastGoal } = savedGoalData;
+      setGoalPlan(lastGoal);
+      setShowDrawer(true);
+      setGenerationStep('complete');
+    }
+  };
+
+  // Modify useEffect to check for last goal on mount
+  useEffect(() => {
+    checkLastGoal();
+  }, []);
+
   const handleSmartGoalValidation = async (isValid: boolean) => {
     if (!isValid) {
       setIsEditingSmartGoal(true)
@@ -145,13 +198,17 @@ export function GoalForm() {
       
       const goalPlan = { goal: goalPlanData, markdown: "" }
       const markdown = generateMarkdown(goalPlan)
-      setGoalPlan({ goal: goalPlanData, markdown })
+      const finalGoalPlan = { goal: goalPlanData, markdown };
+      
+      setGoalPlan(finalGoalPlan)
+      saveGoalToLocalStorage(finalGoalPlan);
+      setHasLastGoal(true);  // Update hasLastGoal when new plan is generated
       setGenerationStep('complete')
       setShowOnboarding(false)
       
       toast({
         title: "Goal Plan Generated!",
-        description: "Your personalized goal plan is ready. Let's walk through how to make the most of it.",
+        description: "Your personalized goal plan is ready and saved for future reference.",
         duration: 5000,
       })
     } catch (error) {
@@ -293,6 +350,18 @@ export function GoalForm() {
         {error && (
           <div className="mb-6 p-4 bg-red-500/20 border border-red-500/40 rounded-lg text-red-200">
             {error}
+          </div>
+        )}
+        {hasLastGoal && (
+          <div className="mb-6 flex justify-center">
+            <Button
+              variant="outline"
+              onClick={viewLastGoal}
+              className="w-full sm:w-auto bg-blue-900/50 text-blue-100 border-blue-400/30 hover:bg-blue-800/60 hover:border-blue-400/50 transition-all duration-200"
+            >
+              <span className="mr-2">📋</span>
+              View Last Goal Plan
+            </Button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-8">
