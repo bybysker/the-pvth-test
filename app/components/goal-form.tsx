@@ -55,6 +55,8 @@ export function GoalForm() {
 
   const [hasLastGoal, setHasLastGoal] = useState(false)
 
+  const [copySuccess, setCopySuccess] = useState(false)
+
   const generateMarkdown = (goalPlan: GoalPlan) => {
     const { goal } = goalPlan;
     let markdown = `# ${goal.name}\n\n`;
@@ -220,19 +222,30 @@ export function GoalForm() {
     }
   }
 
-  const downloadMarkdown = (format: "md" | "txt") => {
+  const copyToClipboard = async () => {
     if (!goalPlan) return;
     
-    const content = format === "md" ? goalPlan.markdown : goalPlan.markdown.replace(/[#*`]/g, "").replace(/\n\n/g, "\n")
-    const blob = new Blob([content], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `my-goal-plan.${format}`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    try {
+      await navigator.clipboard.writeText(goalPlan.markdown)
+      setCopySuccess(true)
+      toast({
+        title: "Copied to clipboard!",
+        description: "Your goal plan has been copied to your clipboard.",
+        duration: 2000,
+      })
+      
+      // Reset success message after 2 seconds
+      setTimeout(() => {
+        setCopySuccess(false)
+      }, 2000)
+    } catch (err) {
+      toast({
+        title: "Failed to copy",
+        description: "Please try again",
+        variant: "destructive",
+        duration: 2000,
+      })
+    }
   }
 
   // Add the feedback submission handler
@@ -605,7 +618,7 @@ export function GoalForm() {
                         <p className="text-sm text-blue-200">{goalPlan.goal.description}</p>
                         <p className="text-sm text-blue-300">Target Date: {new Date(goalPlan.goal.deadline).toLocaleDateString()}</p>
                       </div>
-                      <ScrollArea className="max-h-[50vh]">
+                      <ScrollArea className="max-h-[40vh] overflow-y-auto">
                         <Accordion type="single" collapsible className="w-full">
                           {goalPlan.goal.milestones.map((milestone, index) => (
                             <AccordionItem key={index} value={`milestone-${index}`} className="border-blue-400/30">
@@ -637,26 +650,13 @@ export function GoalForm() {
 
                       <div className="fixed bottom-0 left-0 right-0 bg-blue-900/95 backdrop-blur-sm border-t border-blue-400/20 p-4">
                         <div className="max-w-2xl mx-auto">
-                          <p className="text-blue-100 mb-2 text-sm sm:text-base text-center">
-                            Download your goal plan:
-                          </p>
-                          <div className="flex gap-2 sm:gap-3">
-                            <Button 
-                              variant="outline" 
-                              onClick={() => downloadMarkdown("txt")}
-                              className="flex-1 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-indigo-500 to-blue-500 text-white border-transparent hover:from-indigo-600 hover:to-blue-600 transition-all duration-200"
-                            >
-                              <span className="mr-1 sm:mr-1.5">📄</span>
-                              TXT
-                            </Button>
-                            <Button 
-                              onClick={() => downloadMarkdown("md")}
-                              className="flex-1 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-200"
-                            >
-                              <span className="mr-1 sm:mr-1.5">📝</span>
-                              Markdown
-                            </Button>
-                          </div>
+                          <Button 
+                            onClick={copyToClipboard}
+                            className="w-full py-2 text-sm sm:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-200 flex items-center justify-center gap-2"
+                          >
+                            <span className="mr-1">{copySuccess ? '✓' : '📋'}</span>
+                            {copySuccess ? 'Copied!' : 'Copy to Clipboard'}
+                          </Button>
                         </div>
                       </div>
                     </div>
